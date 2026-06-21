@@ -17,6 +17,7 @@ interface ParsedBlock {
   page: number;
   chapter: string;
   charStart: number;
+  modifyTime: number;
   content: string;
 }
 
@@ -110,19 +111,33 @@ function parseCharStart(chapter: string): number {
 function parseBlock(raw: string): ParsedBlock | null {
   const path = extractField(raw, "linkinfo.path");
   const pageStr = extractField(raw, "linkinfo.page");
-  const chapter = extractField(raw, "linkinfo.chapter");
+  const chapter = extractField(
+    raw, "linkinfo.chapter",
+  );
   const content = extractContent(raw);
 
-  if (!path || !pageStr || !chapter || !content) {
+  if (!path || !pageStr || !content) {
     return null;
   }
 
   const page = parseInt(pageStr, 10);
   if (isNaN(page)) return null;
 
-  const charStart = parseCharStart(chapter);
+  const charStart = chapter
+    ? parseCharStart(chapter)
+    : 0;
 
-  return { path, page, chapter, charStart, content };
+  const modifyTimeStr = extractField(
+    raw, "modify_time.timestamp",
+  );
+  const modifyTime = modifyTimeStr
+    ? parseInt(modifyTimeStr, 10)
+    : 0;
+
+  return {
+    path, page, chapter: chapter || "",
+    charStart, modifyTime, content,
+  };
 }
 
 export function parseDigest(text: string): DigestBook[] {
@@ -148,6 +163,7 @@ export function parseDigest(text: string): DigestBook[] {
       category: string;
       highlights: (DigestHighlight & {
         charStart: number;
+        modifyTime: number;
       })[];
     }
   >();
@@ -178,16 +194,27 @@ export function parseDigest(text: string): DigestBook[] {
       page: parsed.page,
       chapter: chapterNum,
       charStart: parsed.charStart,
+      modifyTime: parsed.modifyTime,
     });
   }
 
   const books: DigestBook[] = [];
   for (const entry of bookMap.values()) {
     entry.highlights.sort((a, b) => {
-      if (a.page !== b.page) return a.page - b.page;
+      // Sort by chapter first (if chapters exist)
       const chA = parseInt(a.chapter, 10);
       const chB = parseInt(b.chapter, 10);
-      if (chA !== chB) return chA - chB;
+      const hasChA = !isNaN(chA);
+      const hasChB = !isNaN(chB);
+      if (hasChA && hasChB && chA !== chB) {
+        return chA - chB;
+      }
+      // Then by page
+      if (a.page !== b.page) return a.page - b.page;
+      // Then by modify time
+      if (a.modifyTime !== b.modifyTime) {
+        return a.modifyTime - b.modifyTime;
+      }
       return a.charStart - b.charStart;
     });
 
@@ -197,7 +224,7 @@ export function parseDigest(text: string): DigestBook[] {
       year: entry.year,
       category: entry.category,
       highlights: entry.highlights.map(
-        ({ charStart: _, ...h }) => h,
+        ({ charStart: _, modifyTime: __, ...h }) => h,
       ),
     });
   }
@@ -221,9 +248,10 @@ export function generateDigestMarkdown(
   lines.push("## Highlights");
 
   for (const h of book.highlights) {
-    lines.push(
-      `- ${h.content} (Page ${h.page}, Chapter ${h.chapter})`,
-    );
+    const loc = h.chapter
+      ? `Page ${h.page}, Chapter ${h.chapter}`
+      : `Page ${h.page}`;
+    lines.push(`- ${h.content} (${loc})`);
   }
 
   return lines.join("\n") + "\n";

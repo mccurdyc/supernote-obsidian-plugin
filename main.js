@@ -61745,16 +61745,31 @@ function parseCharStart(chapter) {
 function parseBlock(raw) {
   const path = extractField(raw, "linkinfo.path");
   const pageStr = extractField(raw, "linkinfo.page");
-  const chapter = extractField(raw, "linkinfo.chapter");
+  const chapter = extractField(
+    raw,
+    "linkinfo.chapter"
+  );
   const content = extractContent(raw);
-  if (!path || !pageStr || !chapter || !content) {
+  if (!path || !pageStr || !content) {
     return null;
   }
   const page = parseInt(pageStr, 10);
   if (isNaN(page))
     return null;
-  const charStart = parseCharStart(chapter);
-  return { path, page, chapter, charStart, content };
+  const charStart = chapter ? parseCharStart(chapter) : 0;
+  const modifyTimeStr = extractField(
+    raw,
+    "modify_time.timestamp"
+  );
+  const modifyTime = modifyTimeStr ? parseInt(modifyTimeStr, 10) : 0;
+  return {
+    path,
+    page,
+    chapter: chapter || "",
+    charStart,
+    modifyTime,
+    content
+  };
 }
 function parseDigest(text) {
   const trimmed = text.trim();
@@ -61787,18 +61802,25 @@ function parseDigest(text) {
       content: parsed.content,
       page: parsed.page,
       chapter: chapterNum,
-      charStart: parsed.charStart
+      charStart: parsed.charStart,
+      modifyTime: parsed.modifyTime
     });
   }
   const books = [];
   for (const entry of bookMap.values()) {
     entry.highlights.sort((a3, b2) => {
-      if (a3.page !== b2.page)
-        return a3.page - b2.page;
       const chA = parseInt(a3.chapter, 10);
       const chB = parseInt(b2.chapter, 10);
-      if (chA !== chB)
+      const hasChA = !isNaN(chA);
+      const hasChB = !isNaN(chB);
+      if (hasChA && hasChB && chA !== chB) {
         return chA - chB;
+      }
+      if (a3.page !== b2.page)
+        return a3.page - b2.page;
+      if (a3.modifyTime !== b2.modifyTime) {
+        return a3.modifyTime - b2.modifyTime;
+      }
       return a3.charStart - b2.charStart;
     });
     books.push({
@@ -61807,7 +61829,7 @@ function parseDigest(text) {
       year: entry.year,
       category: entry.category,
       highlights: entry.highlights.map(
-        ({ charStart: _3, ...h3 }) => h3
+        ({ charStart: _3, modifyTime: __, ...h3 }) => h3
       )
     });
   }
@@ -61825,9 +61847,8 @@ function generateDigestMarkdown(book) {
   lines.push("");
   lines.push("## Highlights");
   for (const h3 of book.highlights) {
-    lines.push(
-      `- ${h3.content} (Page ${h3.page}, Chapter ${h3.chapter})`
-    );
+    const loc = h3.chapter ? `Page ${h3.page}, Chapter ${h3.chapter}` : `Page ${h3.page}`;
+    lines.push(`- ${h3.content} (${loc})`);
   }
   return lines.join("\n") + "\n";
 }
